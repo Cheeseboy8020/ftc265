@@ -2,10 +2,8 @@ package com.spartronics4915.lib;
 
 import android.content.Context;
 import android.util.Log;
-import com.arcrobotics.ftclib.geometry.Pose2d;
-import com.arcrobotics.ftclib.geometry.Rotation2d;
-import com.arcrobotics.ftclib.geometry.Transform2d;
-import com.arcrobotics.ftclib.kinematics.wpilibkinematics.ChassisSpeeds;
+
+import com.asiankoala.koawalib.math.Pose;
 import com.intel.realsense.librealsense.DeviceListener;
 import com.intel.realsense.librealsense.RsContext;
 import com.intel.realsense.librealsense.UsbUtilities;
@@ -60,13 +58,13 @@ public class T265Camera {
 
     public static class CameraUpdate {
         /** The robot's pose in meters. */
-        public final Pose2d pose;
+        public final Pose pose;
         /** The robot's velocity in meters/sec and radians/sec. */
-        public final ChassisSpeeds velocity;
+        public final Pose velocity;
 
         public final PoseConfidence confidence;
 
-        public CameraUpdate(Pose2d pose, ChassisSpeeds velocity, PoseConfidence confidence) {
+        public CameraUpdate(Pose pose, Pose velocity, PoseConfidence confidence) {
             this.pose = pose;
             this.velocity = velocity;
             this.confidence = confidence;
@@ -82,17 +80,17 @@ public class T265Camera {
 
     // Protected by a mutex on this
     private boolean mIsStarted = false;
-    private Transform2d mRobotOffset;
-    private Pose2d mOriginOffset = new Pose2d();
+    private Pose mRobotOffset;
+    private Pose mOriginOffset = new Pose();
 
     // Protected by mUpdateMutex
     private final Object mUpdateMutex = new Object();
-    private Pose2d mLastRecievedCameraUpdate = null;
+    private Pose mLastRecievedCameraUpdate = null;
     private CameraUpdate mLastRecievedUpdate = null;
     private Consumer<CameraUpdate> mPoseConsumer = null;
 
     // Consumer for CameraUpdate
-    private final Consumer<Pose2d> cameraConsumer =
+    private final Consumer<Pose> cameraConsumer =
             (update) -> {
                 synchronized (mUpdateMutex) {
                     mLastRecievedCameraUpdate = update;
@@ -107,7 +105,7 @@ public class T265Camera {
      * @param odometryCovariance Covariance of the odometry input when doing sensor fusion (you
      *     probably want to tune this).
      */
-    public T265Camera(Transform2d robotOffset, double odometryCovariance, Context appContext) {
+    public T265Camera(Pose robotOffset, double odometryCovariance, Context appContext) {
         this(robotOffset, odometryCovariance, "", appContext);
     }
 
@@ -122,7 +120,7 @@ public class T265Camera {
      * @param relocMapPath path (including filename) to a relocalization map to load.
      */
     public T265Camera(
-            Transform2d robotOffsetMeters,
+            Pose robotOffsetMeters,
             double odometryCovariance,
             String relocMapPath,
             Context appContext) {
@@ -156,9 +154,9 @@ public class T265Camera {
                                 mNativeCameraObjectPointer = ptr;
                             }
                             setOdometryInfo(
-                                    (float) robotOffsetMeters.getTranslation().getX(),
-                                    (float) robotOffsetMeters.getTranslation().getY(),
-                                    (float) robotOffsetMeters.getRotation().getRadians(),
+                                    (float) robotOffsetMeters.getX(),
+                                    (float) robotOffsetMeters.getY(),
+                                    (float) robotOffsetMeters.getHeading(),
                                     odometryCovariance);
                             mRobotOffset = robotOffsetMeters;
 
@@ -288,7 +286,7 @@ public class T265Camera {
                 Log.w(
                         kLogTag,
                         "Attempt to get last received update before any updates have been received; are you using the wrong T265Camera::start overload, or is the camera not initialized yet or busy?");
-                return new CameraUpdate(new Pose2d(), new ChassisSpeeds(), PoseConfidence.Failed);
+                return new CameraUpdate(new Pose(), new Pose(), PoseConfidence.Failed);
             }
             return mLastRecievedUpdate;
         }
@@ -332,12 +330,12 @@ public class T265Camera {
      *
      * @param newPose The pose the camera should be zeroed to.
      */
-    public synchronized void setPose(Pose2d newPose) {
+    public synchronized void setPose(Pose newPose) {
         synchronized (mUpdateMutex) {
             mOriginOffset =
                     newPose.relativeTo(
                             mLastRecievedCameraUpdate == null
-                                    ? new Pose2d()
+                                    ? new Pose()
                                     : mLastRecievedCameraUpdate);
         }
     }
@@ -362,10 +360,10 @@ public class T265Camera {
 
     private synchronized void consumeCameraUpdate(
             float x, float y, float radians, float dx, float dy, float dtheta, int confOrdinal) {
-        final Pose2d cameraUpdate =
-                new Pose2d(
-                                x - mRobotOffset.getTranslation().getX(),
-                                y - mRobotOffset.getTranslation().getY(),
+        final Pose cameraUpdate =
+                new Pose(
+                                x - mRobotOffset.getX(),
+                                y - mRobotOffset.getY(),
                                 new Rotation2d(radians))
                         .transformBy(mRobotOffset);
 
@@ -382,8 +380,8 @@ public class T265Camera {
         // is not a directional transformation.
         // Then we transform the pose our camera is giving us so that it reports is
         // the robot's pose, not the camera's. This is a directional transformation.
-        final Pose2d currentPose =
-                new Pose2d(
+        final Pose currentPose =
+                new Pose(
                                 x - mRobotOffset.getTranslation().getX(),
                                 y - mRobotOffset.getTranslation().getY(),
                                 new Rotation2d(radians))
@@ -415,12 +413,12 @@ public class T265Camera {
                                 + "\" passed from native code");
         }
 
-        final Pose2d transformedPose =
+        final Pose transformedPose =
                 mOriginOffset.transformBy(
-                        new Transform2d(currentPose.getTranslation(), currentPose.getRotation()));
+                        new Pose(currentPose.getTranslation(), currentPose.getRotation()));
 
         mPoseConsumer.accept(
-                new CameraUpdate(transformedPose, new ChassisSpeeds(dx, dy, dtheta), confidence));
+                new CameraUpdate(transformedPose, new Pose(dx, dy, dtheta), confidence));
     }
 
     /** Thrown if something goes wrong in the native code */
